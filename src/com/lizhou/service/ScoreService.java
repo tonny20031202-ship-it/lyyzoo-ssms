@@ -294,4 +294,37 @@ public class ScoreService {
 		
 	}
 	
+	/**
+	 * 计算班级各科平均分
+	 * @param classId 班级ID
+	 * @param examId 考试ID
+	 * @return 课程名与平均分的映射，无成绩时返回空Map
+	 */
+	public Map<String, Double> calculateClassAverageScore(int classId, int examId) {
+		Map<String, Double> map = new HashMap<>();
+		java.sql.Connection conn = null;
+		java.sql.PreparedStatement ps = null;
+		java.sql.ResultSet rs = null;
+		try {
+			conn = MysqlTool.getConnection();
+			String sql = "SELECT c.name, AVG(e.score) as avg_score FROM escore e JOIN course c ON e.courseid = c.id WHERE e.clazzid = ? AND e.examid = ? GROUP BY e.courseid, c.name";
+			ps = conn.prepareStatement(sql);
+			ps.setInt(1, classId);
+			ps.setInt(2, examId);
+			rs = ps.executeQuery();
+			while (rs.next()) {
+				String courseName = rs.getString("name");
+				double avgScore = rs.getDouble("avg_score");
+				map.put(courseName, avgScore);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			MysqlTool.close(rs);
+			MysqlTool.close(ps);
+			MysqlTool.closeConnection();
+		}
+		return map;
+	}
+	
 }
