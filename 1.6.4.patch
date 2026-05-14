@@ -1,0 +1,59 @@
+diff --git a/src/com/lizhou/service/ScoreService.java b/src/com/lizhou/service/ScoreService.java
+index f568f37..0925ab3 100644
+--- a/src/com/lizhou/service/ScoreService.java
++++ b/src/com/lizhou/service/ScoreService.java
+@@ -5,6 +5,9 @@ import java.io.UnsupportedEncodingException;
+ import java.lang.reflect.InvocationTargetException;
+ import java.net.URLEncoder;
+ import java.sql.Connection;
++import java.sql.PreparedStatement;
++import java.sql.ResultSet;
++import java.sql.SQLException;
+ import java.util.HashMap;
+ import java.util.LinkedList;
+ import java.util.List;
+@@ -294,4 +297,44 @@ public class ScoreService {
+ 		
+ 	}
+ 	
++	/**
++	 * 计算班级各科平均分
++	 * @param clazzId 班级ID
++	 * @param examId 考试ID
++	 * @return Map&lt;String, Double&gt; 键为课程名，值为平均分
++	 */
++	public Map&lt;String, Double&gt; calculateClassAverageScore(int clazzId, int examId) {
++		Map&lt;String, Double&gt; result = new HashMap&lt;&gt;();
++		Connection conn = null;
++		PreparedStatement ps = null;
++		ResultSet rs = null;
++		
++		try {
++			conn = MysqlTool.getConnection();
++			String sql = "SELECT c.name, AVG(e.score) as avg_score " +
++						 "FROM escore e " +
++						 "JOIN course c ON e.courseid = c.id " +
++						 "WHERE e.clazzid = ? AND e.examid = ? AND e.score IS NOT NULL " +
++						 "GROUP BY c.id, c.name";
++			ps = conn.prepareStatement(sql);
++			ps.setInt(1, clazzId);
++			ps.setInt(2, examId);
++			rs = ps.executeQuery();
++			
++			while(rs.next()) {
++				String courseName = rs.getString("name");
++				double avgScore = rs.getDouble("avg_score");
++				result.put(courseName, avgScore);
++			}
++		} catch (SQLException e) {
++			e.printStackTrace();
++		} finally {
++			MysqlTool.close(rs);
++			MysqlTool.close(ps);
++			MysqlTool.closeConnection();
++		}
++		
++		return result;
++	}
++	
+ }
