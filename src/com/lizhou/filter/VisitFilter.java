@@ -1,6 +1,9 @@
 package com.lizhou.filter;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
@@ -20,6 +23,16 @@ import com.lizhou.bean.User;
  */
 public class VisitFilter implements Filter {
 
+	// 白名单列表，包含无需登录的路径
+	private static final Set<String> WHITE_LIST = new HashSet<String>(Arrays.asList(
+			"",
+			"/",
+			"/index.jsp",
+			"/404.jsp",
+			"/500.jsp",
+			"/LoginServlet"
+	));
+
 	public void destroy() {
 		
 	}
@@ -33,13 +46,46 @@ public class VisitFilter implements Filter {
 		String contextPath = request.getContextPath();
 		
 		String uri = request.getRequestURI();
-		uri = uri.substring(uri.lastIndexOf("/")+1, uri.length());
+		// 改进URI解析逻辑，截取掉 contextPath，得到相对于项目根目录的路径
+		String path = uri.substring(contextPath.length());
+		
+		// 判断是否是静态资源或在白名单中
+		if (isWhiteList(path) || isStaticResource(path)) {
+			chain.doFilter(request, response);
+			return;
+		}
 		
 		if(user != null){
 			chain.doFilter(request, response);
 		} else{
 			response.sendRedirect(contextPath+"/index.jsp");
 		}
+	}
+	
+	/**
+	 * 判断路径是否在白名单中
+	 */
+	private boolean isWhiteList(String path) {
+		return WHITE_LIST.contains(path);
+	}
+	
+	/**
+	 * 判断路径是否是静态资源
+	 */
+	private boolean isStaticResource(String path) {
+		String lowerPath = path.toLowerCase();
+		return lowerPath.endsWith(".css") || 
+			   lowerPath.endsWith(".js") || 
+			   lowerPath.endsWith(".png") || 
+			   lowerPath.endsWith(".jpg") || 
+			   lowerPath.endsWith(".jpeg") || 
+			   lowerPath.endsWith(".gif") || 
+			   lowerPath.endsWith(".ico") || 
+			   lowerPath.endsWith(".woff") || 
+			   lowerPath.endsWith(".woff2") || 
+			   lowerPath.endsWith(".ttf") || 
+			   lowerPath.endsWith(".eot") || 
+			   lowerPath.endsWith(".svg");
 	}
 
 	public void init(FilterConfig arg0) throws ServletException {
