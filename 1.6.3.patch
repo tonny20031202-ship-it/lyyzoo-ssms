@@ -1,0 +1,29 @@
+diff --git a/src/com/lizhou/service/ScoreService.java b/src/com/lizhou/service/ScoreService.java
+index f568f37..27f0cc3 100644
+--- a/src/com/lizhou/service/ScoreService.java
++++ b/src/com/lizhou/service/ScoreService.java
+@@ -293,5 +293,24 @@ public class ScoreService {
+ 		dao.updateBatch("UPDATE escore SET score=? WHERE id=?", param);
+ 		
+ 	}
++
++	public Map<String, Double> calculateClassAverageScore(int clazzid, int examid) {
++		Map<String, Double> result = new HashMap<>();
++		String sql = "SELECT c.name, AVG(e.score) avgscore FROM escore e " +
++					 "JOIN course c ON e.courseid = c.id " +
++					 "WHERE e.clazzid = ? AND e.examid = ? AND e.score IS NOT NULL " +
++					 "GROUP BY e.courseid, c.name";
++		List<Object> list = dao.getList(sql, new Object[]{clazzid, examid});
++		if (list == null || list.isEmpty()) {
++			return result;
++		}
++		for (Object obj : list) {
++			Map<String, Object> map = (Map<String, Object>) obj;
++			String courseName = (String) map.get("name");
++			Double avgScore = ((Number) map.get("avgscore")).doubleValue();
++			result.put(courseName, avgScore);
++		}
++		return result;
++	}
+ 	
+ }
