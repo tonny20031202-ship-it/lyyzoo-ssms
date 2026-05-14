@@ -5,7 +5,11 @@ import java.io.UnsupportedEncodingException;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URLEncoder;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -292,6 +296,33 @@ public class ScoreService {
 		
 		dao.updateBatch("UPDATE escore SET score=? WHERE id=?", param);
 		
+	}
+	
+	public Map<String, Double> calculateClassAverageScore(int clazzId, int examId) {
+		Map<String, Double> averageScoreMap = new LinkedHashMap<>();
+		Connection conn = MysqlTool.getConnection();
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String sql = "SELECT c.name courseName, AVG(e.score) averageScore FROM escore e "
+				+ "INNER JOIN course c ON e.courseid=c.id "
+				+ "WHERE e.clazzid=? AND e.examid=? "
+				+ "GROUP BY c.id, c.name ORDER BY c.id";
+		try {
+			ps = conn.prepareStatement(sql);
+			ps.setInt(1, clazzId);
+			ps.setInt(2, examId);
+			rs = ps.executeQuery();
+			while(rs.next()){
+				averageScoreMap.put(rs.getString("courseName"), rs.getDouble("averageScore"));
+			}
+		} catch (SQLException e) {
+			e.printStackTrace();
+		} finally {
+			MysqlTool.close(rs);
+			MysqlTool.close(ps);
+			MysqlTool.closeConnection();
+		}
+		return averageScoreMap;
 	}
 	
 }
