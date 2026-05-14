@@ -1,6 +1,8 @@
 package com.lizhou.filter;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
@@ -13,12 +15,17 @@ import javax.servlet.http.HttpServletResponse;
 
 import com.lizhou.bean.User;
 
-/**
- * 如果用户没有登录，返回登录界面
- * @author bojiangzhou
- *
- */
 public class VisitFilter implements Filter {
+
+	private static final List<String> WHITE_LIST = Arrays.asList(
+		"/index.jsp",
+		"/404.jsp",
+		"/500.jsp",
+		"/css/",
+		"/js/",
+		"/images/",
+		"/static/"
+	);
 
 	public void destroy() {
 		
@@ -33,12 +40,20 @@ public class VisitFilter implements Filter {
 		String contextPath = request.getContextPath();
 		
 		String uri = request.getRequestURI();
-		uri = uri.substring(uri.lastIndexOf("/")+1, uri.length());
+		String path = uri.substring(contextPath.length());
 		
-		if(user != null){
+		boolean isWhiteListed = false;
+		for (String whitePath : WHITE_LIST) {
+			if (path.startsWith(whitePath) || path.equals(whitePath)) {
+				isWhiteListed = true;
+				break;
+			}
+		}
+		
+		if (isWhiteListed || user != null) {
 			chain.doFilter(request, response);
-		} else{
-			response.sendRedirect(contextPath+"/index.jsp");
+		} else {
+			response.sendRedirect(contextPath + "/index.jsp");
 		}
 	}
 
