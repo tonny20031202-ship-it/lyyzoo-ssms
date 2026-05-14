@@ -5,6 +5,9 @@ import java.io.UnsupportedEncodingException;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URLEncoder;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -292,6 +295,45 @@ public class ScoreService {
 		
 		dao.updateBatch("UPDATE escore SET score=? WHERE id=?", param);
 		
+	}
+	
+	/**
+	 * 计算班级平均分
+	 * @param clazzid 班级ID
+	 * @param examid 考试ID
+	 * @return Map<String, Double> 键为课程名，值为平均分；无成绩时返回空Map
+	 */
+	public Map<String, Double> calculateClassAverageScore(int clazzid, int examid) {
+		Map<String, Double> result = new HashMap<>();
+		
+		String sql = "SELECT c.name, AVG(e.score) AS avg_score "
+				+ "FROM escore e "
+				+ "INNER JOIN course c ON e.courseid = c.id "
+				+ "WHERE e.clazzid = ? AND e.examid = ? AND e.score IS NOT NULL "
+				+ "GROUP BY e.courseid, c.name";
+		
+		try {
+			Connection conn = MysqlTool.getConnection();
+			PreparedStatement ps = conn.prepareStatement(sql);
+			ps.setInt(1, clazzid);
+			ps.setInt(2, examid);
+			ResultSet rs = ps.executeQuery();
+			ResultSetMetaData meta = rs.getMetaData();
+			
+			while(rs.next()){
+				String courseName = rs.getString("name");
+				double avgScore = rs.getDouble("avg_score");
+				result.put(courseName, avgScore);
+			}
+			
+			MysqlTool.closeConnection();
+			MysqlTool.close(ps);
+			MysqlTool.close(rs);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		
+		return result;
 	}
 	
 }
