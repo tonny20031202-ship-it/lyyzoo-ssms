@@ -1,0 +1,124 @@
+diff --git a/src/com/lizhou/tools/StringTool.java b/src/com/lizhou/tools/StringTool.java
+index 39ba6e9..feaa80a 100644
+--- a/src/com/lizhou/tools/StringTool.java
++++ b/src/com/lizhou/tools/StringTool.java
+@@ -1,6 +1,10 @@
+ package com.lizhou.tools;
+ 
+ import java.io.UnsupportedEncodingException;
++import java.util.LinkedHashMap;
++import java.util.Map;
++import java.util.concurrent.locks.ReadWriteLock;
++import java.util.concurrent.locks.ReentrantReadWriteLock;
+ 
+ /**
+  * 字符串工具类
+@@ -9,17 +13,24 @@ import java.io.UnsupportedEncodingException;
+  */
+ public class StringTool {
+ 	
++	private static final int MAX_CACHE_SIZE = 200;
++	
++	private static final LRUCache<String, Boolean> isEmptyCache = new LRUCache<>(MAX_CACHE_SIZE);
++	private static final LRUCache<Integer, String> getMarkCache = new LRUCache<>(MAX_CACHE_SIZE);
++	
+ 	/**
+ 	 * 判断字符串是否为空
+ 	 * @param str
+ 	 * @return true: 空 | false: 不为空
+ 	 */
+ 	public static boolean isEmpty(String str){
+-		if(str == null || "".equals(str.trim())){
+-			return true;
+-		} else{
+-			return false;
++		Boolean cached = isEmptyCache.get(str);
++		if (cached != null) {
++			return cached;
+ 		}
++		boolean result = str == null || "".equals(str.trim());
++		isEmptyCache.put(str, result);
++		return result;
+ 	}
+ 	
+ 	/**
+@@ -44,14 +55,76 @@ public class StringTool {
+ 	 * @return
+ 	 */
+ 	public static String getMark(int length){
++		String cached = getMarkCache.get(length);
++		if (cached != null) {
++			return cached;
++		}
+ 		StringBuffer mark = new StringBuffer("");
+ 		for(int i = 0;i < length;i++){
+ 			mark.append("?,");
+ 		}
+-		//删除最后一个逗号
+ 		mark.deleteCharAt(mark.length()-1);
+-		//返回
+-		return mark.toString();
++		String result = mark.toString();
++		getMarkCache.put(length, result);
++		return result;
++	}
++	
++	/**
++	 * 清空所有缓存
++	 */
++	public static void clearCache() {
++		isEmptyCache.clear();
++		getMarkCache.clear();
++	}
++	
++	/**
++	 * 规范化字符串：去除首尾空格，null 转为空字符串
++	 * @param str
++	 * @return 规范化后的字符串
++	 */
++	public static String normalize(String str) {
++		return str == null ? "" : str.trim();
++	}
++	
++	private static class LRUCache<K, V> {
++		private final Map<K, V> cache;
++		private final ReadWriteLock lock = new ReentrantReadWriteLock();
++		
++		public LRUCache(int maxSize) {
++			this.cache = new LinkedHashMap<K, V>(16, 0.75f, true) {
++				@Override
++				protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
++					return size() > maxSize;
++				}
++			};
++		}
++		
++		public V get(K key) {
++			lock.readLock().lock();
++			try {
++				return cache.get(key);
++			} finally {
++				lock.readLock().unlock();
++			}
++		}
++		
++		public void put(K key, V value) {
++			lock.writeLock().lock();
++			try {
++				cache.put(key, value);
++			} finally {
++				lock.writeLock().unlock();
++			}
++		}
++		
++		public void clear() {
++			lock.writeLock().lock();
++			try {
++				cache.clear();
++			} finally {
++				lock.writeLock().unlock();
++			}
++		}
+ 	}
+ 	
+ }
