@@ -1,0 +1,103 @@
+diff --git a/src/com/lizhou/tools/MysqlTool.java b/src/com/lizhou/tools/MysqlTool.java
+index 94a3364..672109d 100644
+--- a/src/com/lizhou/tools/MysqlTool.java
++++ b/src/com/lizhou/tools/MysqlTool.java
+@@ -25,27 +25,34 @@ public class MysqlTool {
+ 	public static Connection getConnection(){
+ 		Connection conn = tl.get();
+ 		try {
+-			if(conn == null){
++			if(conn == null || conn.isClosed()){
+ 				conn = dataSource.getConnection();
++				tl.set(conn);
+ 			}
+ 		} catch (SQLException e) {
+ 			e.printStackTrace();
+ 		}
+-		tl.set(conn);
+ 		return conn;
+ 	}
+ 	
+-	/**
+-	 * 开始事务
+-	 * @throws SQLException
+-	 */
+-	public static void startTransaction(){
++	public static Connection getConnection(boolean autoCommit){
+ 		Connection conn = getConnection();
+ 		try {
+-			conn.setAutoCommit(false);
++			if(conn != null && conn.getAutoCommit() != autoCommit){
++				conn.setAutoCommit(autoCommit);
++			}
+ 		} catch (SQLException e) {
+ 			e.printStackTrace();
+ 		}
++		return conn;
++	}
++	
++	/**
++	 * 开始事务
++	 * @throws SQLException
++	 */
++	public static void startTransaction(){
++		getConnection(false);
+ 	}
+ 	
+ 	/**
+@@ -53,13 +60,14 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void rollback(){
+-		Connection conn = getConnection();
++		Connection conn = tl.get();
+ 		try {
+-			conn.rollback();
++			if(conn != null && !conn.isClosed()){
++				conn.rollback();
++			}
+ 		} catch (SQLException e) {
+ 			e.printStackTrace();
+ 		}
+-		
+ 	}
+ 	
+ 	/**
+@@ -67,9 +75,11 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void commit(){
+-		Connection conn = getConnection();
++		Connection conn = tl.get();
+ 		try {
+-			conn.commit();
++			if(conn != null && !conn.isClosed()){
++				conn.commit();
++			}
+ 		} catch (SQLException e) {
+ 			e.printStackTrace();
+ 		}
+@@ -80,13 +90,20 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void closeConnection(){
+-		close(getConnection());
+-		tl.remove();
++		Connection conn = tl.get();
++		if (conn != null) {
++			close(conn);
++			tl.remove();
++		}
+ 	}
+ 	
+ 	public static void close(Connection conn){
+ 		try {
+-			if(conn != null){
++			if(conn != null && !conn.isClosed()){
++				// 连接池友好：在归还给连接池之前恢复默认的自动提交状态
++				if(!conn.getAutoCommit()){
++					conn.setAutoCommit(true);
++				}
+ 				conn.close();
+ 			}
+ 		} catch (SQLException e) {
