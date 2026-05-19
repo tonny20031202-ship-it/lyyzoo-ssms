@@ -1,0 +1,133 @@
+diff --git a/src/com/lizhou/tools/MysqlTool.java b/src/com/lizhou/tools/MysqlTool.java
+index 94a3364..a5a0192 100644
+--- a/src/com/lizhou/tools/MysqlTool.java
++++ b/src/com/lizhou/tools/MysqlTool.java
+@@ -12,27 +12,47 @@ import com.mchange.v2.c3p0.ComboPooledDataSource;
+ public class MysqlTool {
+ 	private static ComboPooledDataSource dataSource = null;
+ 	
+-	private static ThreadLocal<Connection> tl = new ThreadLocal<Connection>();
++	private static ThreadLocal<ConnectionHolder> tl = new ThreadLocal<ConnectionHolder>();
+ 	
+ 	static {
+ 		dataSource = new ComboPooledDataSource();
+ 	}
+ 	
++	private static class ConnectionHolder {
++		Connection connection;
++		int refCount;
++		boolean originalAutoCommit;
++		
++		ConnectionHolder(Connection conn) throws SQLException {
++			this.connection = conn;
++			this.originalAutoCommit = conn.getAutoCommit();
++			this.refCount = 1;
++		}
++	}
++	
+ 	public static DataSource getDataSource(){
+ 		return dataSource;
+ 	}
+ 	
+ 	public static Connection getConnection(){
+-		Connection conn = tl.get();
++		return getConnection(true);
++	}
++	
++	public static Connection getConnection(boolean autoCommit){
++		ConnectionHolder holder = tl.get();
+ 		try {
+-			if(conn == null){
+-				conn = dataSource.getConnection();
++			if(holder == null){
++				Connection conn = dataSource.getConnection();
++				holder = new ConnectionHolder(conn);
++				tl.set(holder);
++			} else {
++				holder.refCount++;
+ 			}
++			holder.connection.setAutoCommit(autoCommit);
+ 		} catch (SQLException e) {
+ 			e.printStackTrace();
+ 		}
+-		tl.set(conn);
+-		return conn;
++		return holder != null ? holder.connection : null;
+ 	}
+ 	
+ 	/**
+@@ -53,13 +73,16 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void rollback(){
+-		Connection conn = getConnection();
+-		try {
+-			conn.rollback();
+-		} catch (SQLException e) {
+-			e.printStackTrace();
++		ConnectionHolder holder = tl.get();
++		if(holder != null && holder.connection != null){
++			try {
++				if(!holder.connection.getAutoCommit()){
++					holder.connection.rollback();
++				}
++			} catch (SQLException e) {
++				e.printStackTrace();
++			}
+ 		}
+-		
+ 	}
+ 	
+ 	/**
+@@ -67,11 +90,15 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void commit(){
+-		Connection conn = getConnection();
+-		try {
+-			conn.commit();
+-		} catch (SQLException e) {
+-			e.printStackTrace();
++		ConnectionHolder holder = tl.get();
++		if(holder != null && holder.connection != null){
++			try {
++				if(!holder.connection.getAutoCommit()){
++					holder.connection.commit();
++				}
++			} catch (SQLException e) {
++				e.printStackTrace();
++			}
+ 		}
+ 	}
+ 	
+@@ -80,13 +107,27 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void closeConnection(){
+-		close(getConnection());
+-		tl.remove();
++		ConnectionHolder holder = tl.get();
++		if(holder != null){
++			holder.refCount--;
++			if(holder.refCount <= 0){
++				try {
++					if(holder.connection != null && !holder.connection.isClosed()){
++						holder.connection.setAutoCommit(holder.originalAutoCommit);
++						holder.connection.close();
++					}
++				} catch (SQLException e) {
++					e.printStackTrace();
++				} finally {
++					tl.remove();
++				}
++			}
++		}
+ 	}
+ 	
+ 	public static void close(Connection conn){
+ 		try {
+-			if(conn != null){
++			if(conn != null && !conn.isClosed()){
+ 				conn.close();
+ 			}
+ 		} catch (SQLException e) {
