@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.text.DecimalFormat;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -23,6 +24,20 @@ import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.hssf.util.HSSFColor;
 
 public class ExcelTool<T> {
+	
+	/**
+	 * 单行数据处理器回调接口
+	 */
+	public interface RowProcessor<T> {
+		void process(T row);
+	}
+	
+	/**
+	 * 批量数据处理器回调接口
+	 */
+	public interface BatchProcessor<T> {
+		void processBatch(List<T> batch);
+	}
 	
 	/**
 	 * 导入Excel
@@ -97,6 +112,199 @@ public class ExcelTool<T> {
             }
         }
 		return list;
+	}
+	
+	/**
+	 * 流式导入Excel，支持批量处理和中断
+	 * @param type 目标对象类型
+	 * @param is 输入流
+	 * @param rowProcessor 单行数据处理器
+	 * @param batchSize 批量大小（0表示不批量）
+	 * @throws IOException
+	 * @throws InstantiationException
+	 * @throws IllegalAccessException
+	 * @throws InvocationTargetException
+	 */
+	public void importExcelStream(Class<T> type, InputStream is, RowProcessor<T> rowProcessor, int batchSize) throws IOException, InstantiationException, IllegalAccessException, InvocationTargetException {
+		importExcelStream(type, is, rowProcessor, null, batchSize);
+	}
+	
+	/**
+	 * 流式导入Excel，支持批量处理、批量回调和中断
+	 * @param type 目标对象类型
+	 * @param is 输入流
+	 * @param rowProcessor 单行数据处理器
+	 * @param batchProcessor 批量数据处理器（可选）
+	 * @param batchSize 批量大小（0表示不批量）
+	 * @throws IOException
+	 * @throws InstantiationException
+	 * @throws IllegalAccessException
+	 * @throws InvocationTargetException
+	 */
+	public void importExcelStream(Class<T> type, InputStream is, RowProcessor<T> rowProcessor, BatchProcessor<T> batchProcessor, int batchSize) throws IOException, InstantiationException, IllegalAccessException, InvocationTargetException {
+		HSSFWorkbook workbook = new HSSFWorkbook(is);
+		HSSFSheet sheet = workbook.getSheetAt(0);
+		int rows = sheet.getPhysicalNumberOfRows();
+		HSSFRow titleRow = null;
+		int r = 0;
+		
+		for (; r < rows; r++) {
+			HSSFRow row = sheet.getRow(r);
+			if (row != null) {
+				titleRow = row;
+				break;
+			}
+		}
+		
+		DecimalFormat df = new DecimalFormat("0");
+		List<T> batchList = new ArrayList<T>(batchSize > 0 ? batchSize : 100);
+		r++;
+		
+		for (; r <= rows; r++) {
+			HSSFRow row = sheet.getRow(r);
+			if (row != null) {
+				T obj = type.newInstance();
+				int cells = row.getPhysicalNumberOfCells();
+				
+				for (int j = 0; j <= cells; j++) {
+					HSSFCell cell = row.getCell(j);
+					if (cell != null) {
+						String name = titleRow.getCell(j).getStringCellValue();
+						String value = "";
+						switch (cell.getCellType()) {
+							case HSSFCell.CELL_TYPE_FORMULA:
+								break;
+							case HSSFCell.CELL_TYPE_NUMERIC:
+								value = df.format(cell.getNumericCellValue());
+								break;
+							case HSSFCell.CELL_TYPE_STRING:
+								value = cell.getStringCellValue();
+								break;
+							default:
+								value = "";
+								break;
+						}
+						BeanUtils.setProperty(obj, name, value);
+					}
+				}
+				
+				if (rowProcessor != null) {
+					rowProcessor.process(obj);
+				}
+				
+				if (batchSize > 0) {
+					batchList.add(obj);
+					if (batchList.size() >= batchSize) {
+						if (batchProcessor != null) {
+							batchProcessor.processBatch(new ArrayList<T>(batchList));
+						}
+						batchList.clear();
+					}
+				}
+			}
+		}
+		
+		if (batchSize > 0 && !batchList.isEmpty() && batchProcessor != null) {
+			batchProcessor.processBatch(batchList);
+		}
+	}
+	
+	/**
+	 * 流式导入Excel，返回行迭代器（可用于手动控制迭代过程和中断）
+	 * @param type 目标对象类型
+	 * @param is 输入流
+	 * @return 行迭代器
+	 * @throws IOException
+	 */
+	public ExcelRowIterator<T> importExcelIterator(Class<T> type, InputStream is) throws IOException {
+		return new ExcelRowIterator<T>(type, is);
+	}
+	
+	/**
+	 * Excel行迭代器，用于手动控制迭代过程
+	 */
+	public static class ExcelRowIterator<T> implements Iterator<T> {
+		private Class<T> type;
+		private HSSFWorkbook workbook;
+		private HSSFSheet sheet;
+		private HSSFRow titleRow;
+		private int currentRow;
+		private int totalRows;
+		private DecimalFormat df;
+		
+		public ExcelRowIterator(Class<T> type, InputStream is) throws IOException {
+			this.type = type;
+			this.workbook = new HSSFWorkbook(is);
+			this.sheet = workbook.getSheetAt(0);
+			this.totalRows = sheet.getPhysicalNumberOfRows();
+			this.df = new DecimalFormat("0");
+			
+			for (currentRow = 0; currentRow < totalRows; currentRow++) {
+				HSSFRow row = sheet.getRow(currentRow);
+				if (row != null) {
+					titleRow = row;
+					break;
+				}
+			}
+			currentRow++;
+		}
+		
+		@Override
+		public boolean hasNext() {
+			return currentRow <= totalRows;
+		}
+		
+		@Override
+		public T next() {
+			try {
+				HSSFRow row = sheet.getRow(currentRow);
+				currentRow++;
+				
+				if (row == null) {
+					return null;
+				}
+				
+				T obj = type.newInstance();
+				int cells = row.getPhysicalNumberOfCells();
+				
+				for (int j = 0; j <= cells; j++) {
+					HSSFCell cell = row.getCell(j);
+					if (cell != null) {
+						String name = titleRow.getCell(j).getStringCellValue();
+						String value = "";
+						switch (cell.getCellType()) {
+							case HSSFCell.CELL_TYPE_FORMULA:
+								break;
+							case HSSFCell.CELL_TYPE_NUMERIC:
+								value = df.format(cell.getNumericCellValue());
+								break;
+							case HSSFCell.CELL_TYPE_STRING:
+								value = cell.getStringCellValue();
+								break;
+							default:
+								value = "";
+								break;
+						}
+						BeanUtils.setProperty(obj, name, value);
+					}
+				}
+				
+				return obj;
+			} catch (Exception e) {
+				throw new RuntimeException("Error reading Excel row", e);
+			}
+		}
+		
+		@Override
+		public void remove() {
+			throw new UnsupportedOperationException("Remove operation is not supported");
+		}
+		
+		public void close() throws IOException {
+			if (workbook != null) {
+				workbook.close();
+			}
+		}
 	}
 	
 	/**
