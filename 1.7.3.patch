@@ -1,0 +1,129 @@
+diff --git a/src/com/lizhou/tools/MysqlTool.java b/src/com/lizhou/tools/MysqlTool.java
+index 94a3364..de0c7d5 100644
+--- a/src/com/lizhou/tools/MysqlTool.java
++++ b/src/com/lizhou/tools/MysqlTool.java
+@@ -14,6 +14,8 @@ public class MysqlTool {
+ 	
+ 	private static ThreadLocal<Connection> tl = new ThreadLocal<Connection>();
+ 	
++	private static ThreadLocal<Integer> transactionLevel = new ThreadLocal<Integer>();
++	
+ 	static {
+ 		dataSource = new ComboPooledDataSource();
+ 	}
+@@ -23,15 +25,20 @@ public class MysqlTool {
+ 	}
+ 	
+ 	public static Connection getConnection(){
++		return getConnection(true);
++	}
++	
++	public static Connection getConnection(boolean autoCommit){
+ 		Connection conn = tl.get();
+ 		try {
+ 			if(conn == null){
+ 				conn = dataSource.getConnection();
++				conn.setAutoCommit(autoCommit);
++				tl.set(conn);
+ 			}
+ 		} catch (SQLException e) {
+ 			e.printStackTrace();
+ 		}
+-		tl.set(conn);
+ 		return conn;
+ 	}
+ 	
+@@ -40,12 +47,17 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void startTransaction(){
+-		Connection conn = getConnection();
++		Connection conn = getConnection(false);
+ 		try {
+ 			conn.setAutoCommit(false);
+ 		} catch (SQLException e) {
+ 			e.printStackTrace();
+ 		}
++		Integer level = transactionLevel.get();
++		if(level == null){
++			level = 0;
++		}
++		transactionLevel.set(level + 1);
+ 	}
+ 	
+ 	/**
+@@ -53,13 +65,19 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void rollback(){
+-		Connection conn = getConnection();
+-		try {
+-			conn.rollback();
+-		} catch (SQLException e) {
+-			e.printStackTrace();
++		Integer level = transactionLevel.get();
++		if(level == null || level == 0){
++			return;
++		}
++		Connection conn = tl.get();
++		if(conn != null){
++			try {
++				conn.rollback();
++			} catch (SQLException e) {
++				e.printStackTrace();
++			}
+ 		}
+-		
++		transactionLevel.set(0);
+ 	}
+ 	
+ 	/**
+@@ -67,12 +85,22 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void commit(){
+-		Connection conn = getConnection();
+-		try {
+-			conn.commit();
+-		} catch (SQLException e) {
+-			e.printStackTrace();
++		Integer level = transactionLevel.get();
++		if(level == null || level == 0){
++			return;
+ 		}
++		level = level - 1;
++		if(level == 0){
++			Connection conn = tl.get();
++			if(conn != null){
++				try {
++					conn.commit();
++				} catch (SQLException e) {
++					e.printStackTrace();
++				}
++			}
++		}
++		transactionLevel.set(level);
+ 	}
+ 	
+ 	/**
+@@ -80,8 +108,19 @@ public class MysqlTool {
+ 	 * @throws SQLException
+ 	 */
+ 	public static void closeConnection(){
+-		close(getConnection());
++		Connection conn = tl.get();
++		if(conn != null){
++			try {
++				if(!conn.getAutoCommit()){
++					conn.setAutoCommit(true);
++				}
++			} catch (SQLException e) {
++				e.printStackTrace();
++			}
++			close(conn);
++		}
+ 		tl.remove();
++		transactionLevel.remove();
+ 	}
+ 	
+ 	public static void close(Connection conn){
