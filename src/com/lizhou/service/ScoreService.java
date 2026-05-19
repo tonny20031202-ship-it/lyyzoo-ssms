@@ -58,10 +58,38 @@ public class ScoreService {
 	 */
 	public String getScoreList(Exam exam) {
 		
+		boolean typeIsNull = (exam.getType() == null);
+		if (typeIsNull) {
+			exam.setType(Exam.EXAM_GRADE_TYPE);
+		}
+
 		List<Map<String, Object>> list = dao.getScoreList(exam);
-        //格式化Map,以json格式返回数据
+
+		if (typeIsNull) {
+			exam.setType(null);
+			return JSONArray.fromObject(list).toString();
+		}
+
+		if (exam.getPage() > 0 && exam.getRows() > 0) {
+			int total = list.size();
+			int page = exam.getPage();
+			int rowsPerPage = exam.getRows();
+			int fromIndex = (page - 1) * rowsPerPage;
+			int toIndex = Math.min(fromIndex + rowsPerPage, total);
+			List<Map<String, Object>> pagedList;
+			if (fromIndex < total) {
+				pagedList = new LinkedList<>(list.subList(fromIndex, toIndex));
+			} else {
+				pagedList = new LinkedList<>();
+			}
+			Map<String, Object> jsonMap = new HashMap<String, Object>();
+			jsonMap.put("total", total);
+			jsonMap.put("page", page);
+			jsonMap.put("rows", pagedList);
+			return JSONObject.fromObject(jsonMap).toString();
+		}
+
         String result = JSONArray.fromObject(list).toString();
-        //返回
 		return result;
 	}
 	

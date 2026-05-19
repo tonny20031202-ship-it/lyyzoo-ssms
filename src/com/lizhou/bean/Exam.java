@@ -47,7 +47,11 @@ public class Exam {
 	
 	private int courseid; //考试科目ID
 	
-	private int type = EXAM_GRADE_TYPE; //考试类型:默认为1,1为年级统考，2为平时考试
+	private Integer type = EXAM_GRADE_TYPE; //考试类型:默认为1,1为年级统考，2为平时考试
+	
+	private int page = 0; //页码
+	
+	private int rows = 0; //每页记录数
 
 	public int getId() {
 		return id;
@@ -135,11 +139,11 @@ public class Exam {
 		this.clazzid = clazzid;
 	}
 
-	public int getType() {
+	public Integer getType() {
 		return type;
 	}
 
-	public void setType(int type) {
+	public void setType(Integer type) {
 		this.type = type;
 	}
 
@@ -160,6 +164,22 @@ public class Exam {
 		course.setId(courseid);
 		this.course = course;
 		this.courseid = courseid;
+	}
+
+	public int getPage() {
+		return page;
+	}
+
+	public void setPage(int page) {
+		this.page = page;
+	}
+
+	public int getRows() {
+		return rows;
+	}
+
+	public void setRows(int rows) {
+		this.rows = rows;
 	}
 
 }

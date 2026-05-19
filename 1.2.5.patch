@@ -1,0 +1,97 @@
+diff --git a/src/com/lizhou/bean/Exam.java b/src/com/lizhou/bean/Exam.java
+index 02def6f..cf25428 100644
+--- a/src/com/lizhou/bean/Exam.java
++++ b/src/com/lizhou/bean/Exam.java
+@@ -47,7 +47,11 @@ public class Exam {
+ 	
+ 	private int courseid; //考试科目ID
+ 	
+-	private int type = EXAM_GRADE_TYPE; //考试类型:默认为1,1为年级统考，2为平时考试
++	private Integer type = EXAM_GRADE_TYPE; //考试类型:默认为1,1为年级统考，2为平时考试
++	
++	private int page = 0; //页码
++	
++	private int rows = 0; //每页记录数
+ 
+ 	public int getId() {
+ 		return id;
+@@ -135,11 +139,11 @@ public class Exam {
+ 		this.clazzid = clazzid;
+ 	}
+ 
+-	public int getType() {
++	public Integer getType() {
+ 		return type;
+ 	}
+ 
+-	public void setType(int type) {
++	public void setType(Integer type) {
+ 		this.type = type;
+ 	}
+ 
+@@ -162,4 +166,20 @@ public class Exam {
+ 		this.courseid = courseid;
+ 	}
+ 
++	public int getPage() {
++		return page;
++	}
++
++	public void setPage(int page) {
++		this.page = page;
++	}
++
++	public int getRows() {
++		return rows;
++	}
++
++	public void setRows(int rows) {
++		this.rows = rows;
++	}
++
+ }
+diff --git a/src/com/lizhou/service/ScoreService.java b/src/com/lizhou/service/ScoreService.java
+index f568f37..47ecd81 100644
+--- a/src/com/lizhou/service/ScoreService.java
++++ b/src/com/lizhou/service/ScoreService.java
+@@ -58,10 +58,38 @@ public class ScoreService {
+ 	 */
+ 	public String getScoreList(Exam exam) {
+ 		
++		boolean typeIsNull = (exam.getType() == null);
++		if (typeIsNull) {
++			exam.setType(Exam.EXAM_GRADE_TYPE);
++		}
++
+ 		List<Map<String, Object>> list = dao.getScoreList(exam);
+-        //格式化Map,以json格式返回数据
++
++		if (typeIsNull) {
++			exam.setType(null);
++			return JSONArray.fromObject(list).toString();
++		}
++
++		if (exam.getPage() > 0 && exam.getRows() > 0) {
++			int total = list.size();
++			int page = exam.getPage();
++			int rowsPerPage = exam.getRows();
++			int fromIndex = (page - 1) * rowsPerPage;
++			int toIndex = Math.min(fromIndex + rowsPerPage, total);
++			List<Map<String, Object>> pagedList;
++			if (fromIndex < total) {
++				pagedList = new LinkedList<>(list.subList(fromIndex, toIndex));
++			} else {
++				pagedList = new LinkedList<>();
++			}
++			Map<String, Object> jsonMap = new HashMap<String, Object>();
++			jsonMap.put("total", total);
++			jsonMap.put("page", page);
++			jsonMap.put("rows", pagedList);
++			return JSONObject.fromObject(jsonMap).toString();
++		}
++
+         String result = JSONArray.fromObject(list).toString();
+-        //返回
+ 		return result;
+ 	}
+ 	
