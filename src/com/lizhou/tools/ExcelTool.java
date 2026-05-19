@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.apache.commons.beanutils.BeanUtils;
 import org.apache.poi.hssf.usermodel.HSSFCell;
@@ -97,6 +98,147 @@ public class ExcelTool<T> {
             }
         }
 		return list;
+	}
+	
+	/**
+	 * 流式导入Excel，支持大文件处理
+	 * @param type 目标对象类型
+	 * @param is 输入流
+	 * @param rowProcessor 行处理器，返回 false 可中断处理
+	 * @param batchSize 批量大小，每处理完一批后调用 flush
+	 * @return 处理的总行数
+	 * @throws IOException
+	 * @throws InstantiationException
+	 * @throws IllegalAccessException
+	 * @throws InvocationTargetException
+	 */
+	public long importExcelStream(Class<T> type, InputStream is, RowProcessor<T> rowProcessor, int batchSize) 
+			throws IOException, InstantiationException, IllegalAccessException, InvocationTargetException {
+		HSSFWorkbook workbook = new HSSFWorkbook(is);
+		HSSFSheet sheet = workbook.getSheetAt(0);
+		int rows = sheet.getPhysicalNumberOfRows();
+		
+		HSSFRow titleRow = null;
+		int r = 0;
+		for (; r < rows; r++) {
+			HSSFRow row = sheet.getRow(r);
+			if (row != null) {
+				titleRow = row;
+				break;
+			}
+		}
+		
+		DecimalFormat df = new DecimalFormat("0");
+		List<T> batchList = new LinkedList<T>();
+		long totalCount = 0;
+		
+		r++;
+		for (; r < rows; r++) {
+			HSSFRow row = sheet.getRow(r);
+			if (row != null) {
+				T obj = type.newInstance();
+				int cells = row.getPhysicalNumberOfCells();
+				for (int j = 0; j <= cells; j++) {
+					HSSFCell cell = row.getCell(j);
+					if (cell != null) {
+						String name = titleRow.getCell(j).getStringCellValue();
+						String value = "";
+						switch (cell.getCellType()) {
+							case HSSFCell.CELL_TYPE_FORMULA:
+								break;
+							case HSSFCell.CELL_TYPE_NUMERIC:
+								value = df.format(cell.getNumericCellValue());
+								break;
+							case HSSFCell.CELL_TYPE_STRING:
+								value = cell.getStringCellValue();
+								break;
+							default:
+								value = "";
+								break;
+						}
+						BeanUtils.setProperty(obj, name, value);
+					}
+				}
+				
+				if (!rowProcessor.process(obj)) {
+					workbook.close();
+					return totalCount;
+				}
+				
+				batchList.add(obj);
+				totalCount++;
+				
+				if (batchList.size() >= batchSize) {
+					rowProcessor.flush(batchList);
+					batchList.clear();
+				}
+			}
+		}
+		
+		if (!batchList.isEmpty()) {
+			rowProcessor.flush(batchList);
+		}
+		
+		workbook.close();
+		return totalCount;
+	}
+	
+	/**
+	 * 流式导入Excel，使用Consumer回调
+	 * @param type 目标对象类型
+	 * @param is 输入流
+	 * @param rowConsumer 行消费器
+	 * @param batchSize 批量大小
+	 * @return 处理的总行数
+	 * @throws IOException
+	 * @throws InstantiationException
+	 * @throws IllegalAccessException
+	 * @throws InvocationTargetException
+	 */
+	public long importExcelStream(Class<T> type, InputStream is, Consumer<T> rowConsumer, int batchSize) 
+			throws IOException, InstantiationException, IllegalAccessException, InvocationTargetException {
+		return importExcelStream(type, is, new DefaultRowProcessor<T>(rowConsumer), batchSize);
+	}
+	
+	/**
+	 * 行处理器接口，支持中断和批量刷新
+	 * @param <T>
+	 */
+	public interface RowProcessor<T> {
+		/**
+		 * 处理单行数据
+		 * @param rowData 行数据对象
+		 * @return true 继续处理，false 中断处理
+		 */
+		boolean process(T rowData);
+		
+		/**
+		 * 刷新批量数据
+		 * @param batchData 批量数据列表
+		 */
+		void flush(List<T> batchData);
+	}
+	
+	/**
+	 * 默认行处理器实现
+	 * @param <T>
+	 */
+	public static class DefaultRowProcessor<T> implements RowProcessor<T> {
+		private final Consumer<T> consumer;
+		
+		public DefaultRowProcessor(Consumer<T> consumer) {
+			this.consumer = consumer;
+		}
+		
+		@Override
+		public boolean process(T rowData) {
+			consumer.accept(rowData);
+			return true;
+		}
+		
+		@Override
+		public void flush(List<T> batchData) {
+		}
 	}
 	
 	/**
