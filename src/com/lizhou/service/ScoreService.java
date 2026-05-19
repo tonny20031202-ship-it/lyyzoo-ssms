@@ -59,10 +59,54 @@ public class ScoreService {
 	public String getScoreList(Exam exam) {
 		
 		List<Map<String, Object>> list = dao.getScoreList(exam);
-        //格式化Map,以json格式返回数据
-        String result = JSONArray.fromObject(list).toString();
-        //返回
-		return result;
+		
+		Integer page = null;
+		Integer rows = null;
+		boolean typeIsNull = false;
+		
+		// 兼容动态检查 type 是否为 null
+		try {
+			Object typeObj = exam.getClass().getMethod("getType").invoke(exam);
+			if (typeObj == null) {
+				typeIsNull = true;
+			}
+		} catch (Exception e) {
+			// 忽略
+		}
+		
+		// 动态获取 page 和 rows
+		try {
+			Object p = exam.getClass().getMethod("getPage").invoke(exam);
+			Object r = exam.getClass().getMethod("getRows").invoke(exam);
+			if (p != null && r != null) {
+				page = Integer.parseInt(p.toString());
+				rows = Integer.parseInt(r.toString());
+			}
+		} catch (Exception e) {
+			// 忽略
+		}
+		
+		// 如果 exam.getType() == null 或者没有分页参数，保持兼容原始纯数组输出
+		if (typeIsNull || page == null || rows == null) {
+			return JSONArray.fromObject(list).toString();
+		}
+		
+		// 新增统计总数逻辑和分页计算
+		int total = list.size();
+		int start = (page - 1) * rows;
+		if (start < 0) start = 0;
+		int end = start + rows;
+		if (end > total) end = total;
+		if (start > total) start = total;
+		
+		List<Map<String, Object>> pagedList = list.subList(start, end);
+		
+		Map<String, Object> result = new HashMap<>();
+		result.put("total", total);
+		result.put("page", page);
+		result.put("rows", pagedList);
+		
+		return JSONObject.fromObject(result).toString();
 	}
 	
 	/**
