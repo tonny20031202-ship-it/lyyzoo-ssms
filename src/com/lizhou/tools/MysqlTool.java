@@ -23,15 +23,44 @@ public class MysqlTool {
 	}
 	
 	public static Connection getConnection(){
-		Connection conn = tl.get();
+		Connection conn = getThreadConnection();
+		if(conn != null){
+			return conn;
+		}
+		return getConnection(true);
+	}
+	
+	public static Connection getConnection(boolean autoCommit){
+		Connection conn = getThreadConnection();
 		try {
 			if(conn == null){
 				conn = dataSource.getConnection();
+				tl.set(conn);
+			}
+			if(conn.getAutoCommit() != autoCommit){
+				conn.setAutoCommit(autoCommit);
 			}
 		} catch (SQLException e) {
 			e.printStackTrace();
 		}
-		tl.set(conn);
+		return conn;
+	}
+	
+	private static Connection getThreadConnection(){
+		Connection conn = tl.get();
+		if(conn == null){
+			return null;
+		}
+		try {
+			if(conn.isClosed()){
+				tl.remove();
+				return null;
+			}
+		} catch (SQLException e) {
+			e.printStackTrace();
+			tl.remove();
+			return null;
+		}
 		return conn;
 	}
 	
@@ -40,12 +69,7 @@ public class MysqlTool {
 	 * @throws SQLException
 	 */
 	public static void startTransaction(){
-		Connection conn = getConnection();
-		try {
-			conn.setAutoCommit(false);
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
+		getConnection(false);
 	}
 	
 	/**
@@ -53,9 +77,14 @@ public class MysqlTool {
 	 * @throws SQLException
 	 */
 	public static void rollback(){
-		Connection conn = getConnection();
+		Connection conn = getThreadConnection();
+		if(conn == null){
+			return;
+		}
 		try {
-			conn.rollback();
+			if(!conn.getAutoCommit()){
+				conn.rollback();
+			}
 		} catch (SQLException e) {
 			e.printStackTrace();
 		}
@@ -67,9 +96,14 @@ public class MysqlTool {
 	 * @throws SQLException
 	 */
 	public static void commit(){
-		Connection conn = getConnection();
+		Connection conn = getThreadConnection();
+		if(conn == null){
+			return;
+		}
 		try {
-			conn.commit();
+			if(!conn.getAutoCommit()){
+				conn.commit();
+			}
 		} catch (SQLException e) {
 			e.printStackTrace();
 		}
@@ -80,13 +114,17 @@ public class MysqlTool {
 	 * @throws SQLException
 	 */
 	public static void closeConnection(){
-		close(getConnection());
+		Connection conn = tl.get();
 		tl.remove();
+		close(conn);
 	}
 	
 	public static void close(Connection conn){
 		try {
-			if(conn != null){
+			if(conn != null && !conn.isClosed()){
+				if(!conn.getAutoCommit()){
+					conn.setAutoCommit(true);
+				}
 				conn.close();
 			}
 		} catch (SQLException e) {
