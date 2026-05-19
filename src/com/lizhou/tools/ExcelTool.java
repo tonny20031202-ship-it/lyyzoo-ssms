@@ -12,8 +12,52 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.apache.commons.beanutils.BeanUtils;
+import org.apache.poi.hssf.eventusermodel.HSSFEventFactory;
+import org.apache.poi.hssf.eventusermodel.HSSFListener;
+import org.apache.poi.hssf.eventusermodel.HSSFRequest;
+import org.apache.poi.hssf.model.HSSFRowRecord;
+import org.apache.poi.hssf.model.WorkbookRecord;
+import org.apache.poi.hssf.record.BOFRecord;
+import org.apache.poi.hssf.record.BooleanPropertySetBlock;
+import org.apache.poi.hssf.record.CellValueRecordInterface;
+import org.apache.poi.hssf.record.ColumnInfoRecord;
+import org.apache.poi.hssf.record.CommonObjectDataSubRecord;
+import org.apache.poi.hssf.record.CountryRecord;
+import org.apache.poi.hssf.record.EndObjectLinkSubRecord;
+import org.apache.poi.hssf.record.ExtendedFormatRecord;
+import org.apache.poi.hssf.record.FeatHdrRecord;
+import org.apache.poi.hssf.record.FilePassRecord;
+import org.apache.poi.hssf.record.FontRecord;
+import org.apache.poi.hssf.record.FormatRecord;
+import org.apache.poi.hssf.record.FormulaRecord;
+import org.apache.poi.hssf.record.HyperlinkRecord;
+import org.apache.poi.hssf.record.InterfaceEndRecord;
+import org.apache.poi.hssf.record.InterfaceHdrRecord;
+import org.apache.poi.hssf.record.LabelRecord;
+import org.apache.poi.hssf.record.LabelSSTRecord;
+import org.apache.poi.hssf.record.MMSRecord;
+import org.apache.poi.hssf.record.MergedCellsRegion;
+import org.apache.poi.hssf.record.NoteRecord;
+import org.apache.poi.hssf.record.NumberRecord;
+import org.apache.poi.hssf.record.ObjRecord;
+import org.apache.poi.hssf.record.PaletteRecord;
+import org.apache.poi.hssf.record.PaneRecord;
+import org.apache.poi.hssf.record.RKRecord;
+import org.apache.poi.hssf.record.RowRecord;
+import org.apache.poi.hssf.record.SSTRecord;
+import org.apache.poi.hssf.record.SelectionRecord;
+import org.apache.poi.hssf.record.SeriesTextRecord;
+import org.apache.poi.hssf.record.SharedFormulaRecord;
+import org.apache.poi.hssf.record.StringRecord;
+import org.apache.poi.hssf.record.StyleRecord;
+import org.apache.poi.hssf.record.SubRecord;
+import org.apache.poi.hssf.record.TableRecord;
+import org.apache.poi.hssf.record.UnicodeString;
+import org.apache.poi.hssf.record.WindowOneRecord;
+import org.apache.poi.hssf.record.WindowTwoRecord;
 import org.apache.poi.hssf.usermodel.HSSFCell;
 import org.apache.poi.hssf.usermodel.HSSFCellStyle;
 import org.apache.poi.hssf.usermodel.HSSFFont;
@@ -217,6 +261,328 @@ public class ExcelTool<T> {
         }
 
     }
-	
-	
+
+	public int importExcelStream(Class<T> type, InputStream is, Consumer<T> rowProcessor, int batchSize)
+			throws IOException, InstantiationException, IllegalAccessException, InvocationTargetException {
+		if (batchSize <= 0) {
+			batchSize = 1000;
+		}
+		DecimalFormat df = new DecimalFormat("0");
+
+		HSSFEventFactory factory = new HSSFEventFactory();
+		HSSFRequest request = new HSSFRequest();
+		request.setIntercepting(false);
+
+		StreamListener listener = new StreamListener(type, rowProcessor, df, batchSize);
+		request.addListener(listener);
+
+		factory.processWorkbookEvents(request, is);
+
+		listener.flushRemaining();
+
+		return listener.getProcessedRows();
+	}
+
+	public static class AbortableStreamListener extends StreamListener {
+		public AbortableStreamListener(Class<?> type, Consumer<T> rowProcessor, DecimalFormat df, int batchSize) {
+			super(type, rowProcessor, df, batchSize);
+		}
+	}
+
+	public static class StreamListener implements HSSFListener {
+		private final Class<?> type;
+		private final Consumer<T> rowProcessor;
+		private final DecimalFormat df;
+		private final int batchSize;
+		private SSTRecord[] sharedStrings;
+		private int currentRow = -1;
+		private Object[] currentRowData;
+		private int maxCells = 0;
+		private int processedRows = 0;
+		private boolean processingTitle = true;
+		private String[] titleNames;
+		private int batchCount = 0;
+		private volatile boolean aborted = false;
+
+		public StreamListener(Class<?> type, Consumer<T> rowProcessor, DecimalFormat df, int batchSize) {
+			this.type = type;
+			this.rowProcessor = rowProcessor;
+			this.df = df;
+			this.batchSize = batchSize;
+		}
+
+		public void abort() {
+			this.aborted = true;
+		}
+
+		public boolean isAborted() {
+			return aborted;
+		}
+
+		@Override
+		public void processRecord(org.apache.poi.hssf.record.Record record) {
+			if (aborted) {
+				return;
+			}
+
+			short sid = record.getSid();
+
+			if (sid == SSTRecord.sid) {
+				sharedStrings = ((SSTRecord) record).getRecords();
+				return;
+			}
+
+			if (sid == RowRecord.sid) {
+				RowRecord rowRec = (RowRecord) record;
+				int rowNum = rowRec.getRowNumber();
+
+				if (processingTitle && rowNum == 0) {
+					currentRow = 0;
+					maxCells = rowRec.getLastCellNum();
+					if (maxCells > 0) {
+						titleNames = new String[maxCells];
+						currentRowData = new Object[maxCells];
+					}
+					return;
+				}
+
+				if (currentRowData != null && hasData(currentRowData)) {
+					deliverRow();
+				}
+
+				currentRow = rowNum;
+				maxCells = rowRec.getLastCellNum();
+				currentRowData = new Object[maxCells];
+				return;
+			}
+
+			if (processingTitle) {
+				if (sid == LabelSSTRecord.sid && currentRow == 0) {
+					LabelSSTRecord labelRec = (LabelSSTRecord) record;
+					int cellIdx = labelRec.getColumn();
+					if (cellIdx < maxCells && sharedStrings != null) {
+						titleNames[cellIdx] = sharedStrings[labelRec.getSSTIndex()].getString();
+					}
+				}
+				return;
+			}
+
+			if (currentRowData == null) {
+				return;
+			}
+
+			if (sid == LabelSSTRecord.sid) {
+				LabelSSTRecord labelRec = (LabelSSTRecord) record;
+				int cellIdx = labelRec.getColumn();
+				if (cellIdx < maxCells && sharedStrings != null) {
+					currentRowData[cellIdx] = sharedStrings[labelRec.getSSTIndex()].getString();
+				}
+				return;
+			}
+
+			if (sid == NumberRecord.sid) {
+				NumberRecord numRec = (NumberRecord) record;
+				int cellIdx = numRec.getColumn();
+				if (cellIdx < maxCells) {
+					currentRowData[cellIdx] = df.format(numRec.getValue());
+				}
+				return;
+			}
+
+			if (sid == LabelRecord.sid) {
+				LabelRecord labelRec = (LabelRecord) record;
+				int cellIdx = labelRec.getColumn();
+				if (cellIdx < maxCells) {
+					currentRowData[cellIdx] = labelRec.getText();
+				}
+				return;
+			}
+
+			if (sid == RKRecord.sid) {
+				RKRecord rkRec = (RKRecord) record;
+				int cellIdx = rkRec.getColumn();
+				if (cellIdx < maxCells) {
+					currentRowData[cellIdx] = df.format(rkRec.getRKNumber());
+				}
+				return;
+			}
+
+			if (sid == BOFRecord.sid) {
+				BOFRecord bofRec = (BOFRecord) record;
+				if (bofRec.getType() == BOFRecord.CALCSET) {
+					processingTitle = false;
+				}
+				return;
+			}
+		}
+
+		private boolean hasData(Object[] row) {
+			if (row == null) return false;
+			for (Object cell : row) {
+				if (cell != null && !cell.toString().isEmpty()) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		@SuppressWarnings("unchecked")
+		private void deliverRow() {
+			try {
+				Object obj = type.newInstance();
+				for (int i = 0; i < titleNames.length && i < currentRowData.length; i++) {
+					if (titleNames[i] != null && currentRowData[i] != null) {
+						BeanUtils.setProperty(obj, titleNames[i], currentRowData[i]);
+					}
+				}
+				rowProcessor.accept((T) obj);
+				processedRows++;
+				batchCount++;
+
+				if (batchCount >= batchSize) {
+					batchCount = 0;
+				}
+			} catch (Exception e) {
+				throw new RuntimeException("Error processing row " + currentRow, e);
+			}
+		}
+
+		public void flushRemaining() {
+			if (currentRowData != null && hasData(currentRowData) && !aborted) {
+				deliverRow();
+			}
+		}
+
+		public int getProcessedRows() {
+			return processedRows;
+		}
+	}
+
+	public static class ExcelRowIterator implements Iterator<Object[]>, AutoCloseable {
+		private final InputStream is;
+		private final HSSFEventFactory factory = new HSSFEventFactory();
+		private SSTRecord[] sharedStrings;
+		private Object[] currentRowData;
+		private int currentRow = -1;
+		private int maxCells = 0;
+		private boolean hasNext = false;
+		private boolean closed = false;
+		private boolean titleExtracted = false;
+		private boolean processingTitle = true;
+		private DecimalFormat df = new DecimalFormat("0");
+		private boolean endOfData = false;
+
+		public ExcelRowIterator(InputStream is) {
+			this.is = is;
+		}
+
+		private void ensureInitialized() {
+			if (currentRowData == null && !endOfData) {
+				processNextBatch();
+			}
+		}
+
+		private void processNextBatch() {
+			IteratorListener listener = new IteratorListener(this);
+			HSSFRequest request = new HSSFRequest();
+			request.setIntercepting(false);
+			try {
+				factory.processWorkbookEvents(request, is);
+				endOfData = true;
+			} catch (IOException e) {
+				throw new RuntimeException("Error reading Excel stream", e);
+			}
+		}
+
+		@Override
+		public boolean hasNext() {
+			ensureInitialized();
+			return hasNext && !endOfData;
+		}
+
+		@Override
+		public Object[] next() {
+			if (!hasNext()) {
+				throw new java.util.NoSuchElementException();
+			}
+			Object[] row = currentRowData;
+			currentRowData = null;
+			hasNext = false;
+			processNextBatch();
+			return row;
+		}
+
+		@Override
+		public void close() throws IOException {
+			if (!closed) {
+				is.close();
+				closed = true;
+			}
+		}
+
+		private static class IteratorListener implements HSSFListener {
+			private final ExcelRowIterator iterator;
+			private SSTRecord[] sharedStrings;
+
+			public IteratorListener(ExcelRowIterator iterator) {
+				this.iterator = iterator;
+			}
+
+			@Override
+			public void processRecord(org.apache.poi.hssf.record.Record record) {
+				short sid = record.getSid();
+
+				if (sid == SSTRecord.sid) {
+					sharedStrings = ((SSTRecord) record).getRecords();
+					return;
+				}
+
+				if (sid == RowRecord.sid) {
+					RowRecord rowRec = (RowRecord) record;
+					if (iterator.processingTitle && rowRec.getRowNumber() == 0) {
+						iterator.maxCells = rowRec.getLastCellNum();
+					} else {
+						iterator.currentRow = rowRec.getRowNumber();
+						iterator.maxCells = rowRec.getLastCellNum();
+						iterator.currentRowData = new Object[iterator.maxCells];
+						iterator.hasNext = true;
+						iterator.processingTitle = false;
+					}
+					return;
+				}
+
+				if (iterator.processingTitle || iterator.currentRowData == null) {
+					return;
+				}
+
+				if (sid == LabelSSTRecord.sid) {
+					LabelSSTRecord labelRec = (LabelSSTRecord) record;
+					int cellIdx = labelRec.getColumn();
+					if (cellIdx < iterator.maxCells && sharedStrings != null) {
+						iterator.currentRowData[cellIdx] = sharedStrings[labelRec.getSSTIndex()].getString();
+					}
+					return;
+				}
+
+				if (sid == NumberRecord.sid) {
+					NumberRecord numRec = (NumberRecord) record;
+					int cellIdx = numRec.getColumn();
+					if (cellIdx < iterator.maxCells) {
+						iterator.currentRowData[cellIdx] = iterator.df.format(numRec.getValue());
+					}
+					return;
+				}
+
+				if (sid == BOFRecord.sid) {
+					BOFRecord bofRec = (BOFRecord) record;
+					if (bofRec.getType() == BOFRecord.CALCSET && !iterator.titleExtracted) {
+						iterator.processingTitle = false;
+						iterator.titleExtracted = true;
+					}
+					return;
+				}
+			}
+		}
+	}
+
 }
